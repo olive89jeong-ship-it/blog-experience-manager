@@ -38,7 +38,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
 .field label{display:block;font-size:12px;font-weight:600;color:#666;margin-bottom:5px;letter-spacing:.02em}
 .field input,.field textarea,.field select{width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:13px;background:#fafafa;color:#1a1a1a;font-family:inherit;transition:border-color .15s}
 .field input:focus,.field textarea:focus{outline:none;border-color:#3d35a8;background:#fff}
-.field textarea{resize:vertical;min-height:150px;line-height:1.5}
+.field textarea{resize:vertical;min-height:60px;line-height:1.5}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 .field-hint{font-size:11px;color:#aaa;margin-top:4px}
 
@@ -141,6 +141,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:#ddd;border-radius:3px}
+
+/* ── AUTH / CLOUD SYNC ── */
+.sync-pill{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:20px;background:#f0f0ee;color:#666;font-size:11px;font-weight:600;white-space:nowrap}
+.sync-pill.cloud{background:#e8f5ee;color:#1a7a4a}
+.sync-pill.warn{background:#fff3ee;color:#b84a1c}
+.auth-box{background:#fff;border-radius:14px;border:1px solid #e8e8e6;padding:28px;max-width:520px;margin:70px auto;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.04)}
+.auth-box h2{font-size:18px;margin-bottom:10px;color:#1a1a1a}
+.auth-box p{font-size:13px;color:#666;line-height:1.7;margin-bottom:18px}
+.auth-note{background:#f8f7ff;border:1px solid #dedaf8;color:#3d35a8;border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.6;text-align:left;margin-top:14px}
+.auth-modal{width:420px}
+.auth-error{font-size:12px;color:#d44;line-height:1.5;min-height:18px;margin-top:8px}
+.cloud-hint{font-size:11px;color:#999;line-height:1.5;margin-top:6px}
+
 </style>
 </head>
 <body>
@@ -159,6 +172,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
     <button class="nav-tab" onclick="showTab('completed')" id="tab-completed">✅ 완료 체험</button>
   </div>
   <div class="topbar-actions">
+    <span class="sync-pill" id="sync-status">로컬 저장</span>
+    <button class="btn" id="login-btn" onclick="openAuthModal()">로그인</button>
+    <button class="btn" id="logout-btn" onclick="handleLogout()" style="display:none">로그아웃</button>
+    <button class="btn" id="migrate-btn" onclick="migrateLocalToCloud()" style="display:none">로컬→클라우드</button>
     <button class="btn" onclick="exportData()">⬇ 백업</button>
     <label class="btn" style="cursor:pointer">⬆ 불러오기
       <input type="file" id="import-input" accept=".json" style="display:none" onchange="importData(event)">
@@ -168,6 +185,22 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
 </div>
 
 <div class="content" id="main-content"></div>
+
+<!-- ======== LOGIN MODAL ======== -->
+<div class="overlay" id="auth-overlay">
+  <div class="modal auth-modal">
+    <h2>🔐 로그인</h2>
+    <div class="field"><label>이메일</label><input id="auth-email" type="email" placeholder="예: your@email.com" autocomplete="email"/></div>
+    <div class="field"><label>비밀번호</label><input id="auth-password" type="password" placeholder="6자 이상" autocomplete="current-password"/></div>
+    <div class="auth-error" id="auth-error"></div>
+    <div class="cloud-hint">같은 계정으로 PC·모바일·태블릿에서 로그인하면 같은 체험단 데이터를 볼 수 있습니다.</div>
+    <div class="modal-btns">
+      <button class="btn" onclick="closeAuthModal()">닫기</button>
+      <button class="btn" onclick="handleSignup()">회원가입</button>
+      <button class="btn primary" onclick="handleLogin()">로그인</button>
+    </div>
+  </div>
+</div>
 
 <!-- ======== ADD / EDIT MODAL ======== -->
 <div class="overlay" id="add-overlay">
@@ -266,30 +299,289 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
   </div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+
 <script>
 // ─────────────────────────────────────────────
 //  STATE
 // ─────────────────────────────────────────────
 const STORE_KEY = 'blog_exp_v2';
+
+// Firebase 설정값을 본인 프로젝트 값으로 바꾸면 클라우드 동기화가 켜집니다.
+// 설정 전에는 기존처럼 이 브라우저에만 저장되는 로컬 모드로 동작합니다.
+const firebaseConfig = {
+  apiKey: "AIzaSyBMaXY6nn2_wuv2YmpS69R1vZhV6gy0N5Q",
+  authDomain: "blogexperience-c39b0.firebaseapp.com",
+  projectId: "blogexperience-c39b0",
+  storageBucket: "blogexperience-c39b0.firebasestorage.app",
+  messagingSenderId: "204776910877",
+  appId: "1:204776910877:web:f1392d8a8fbab15e21d6f4",
+  measurementId: "G-DWJPVL8QBK"
+};
+
+
+const FIREBASE_ENABLED = !!(FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.includes('YOUR_'));
+let firebaseApp = null;
+let auth = null;
+let db = null;
+let cloudSaveTimer = null;
+
 let state = {
   tab: 'active',
   cards: [],
+  localCards: [],
   calYear: new Date().getFullYear(),
   calMonth: new Date().getMonth(),
   selectedCalId: null,
   schedTargetId: null,
   msgTargetId: null,
-  editTargetId: null
+  editTargetId: null,
+  user: null,
+  authChecked: !FIREBASE_ENABLED,
+  unsubscribeCloud: null,
+  cloudLoaded: false,
+  isApplyingCloudSnapshot: false,
+  migrationPromptShown: false
 };
 
-function loadState() {
+function readLocalCards() {
   try {
     const d = localStorage.getItem(STORE_KEY);
-    if (d) { const p = JSON.parse(d); state.cards = p.cards || []; }
-  } catch(e) {}
+    if (!d) return [];
+    const p = JSON.parse(d);
+    return Array.isArray(p.cards) ? p.cards : [];
+  } catch(e) { return []; }
 }
+
+function loadState() {
+  state.localCards = readLocalCards();
+  if (!FIREBASE_ENABLED) {
+    state.cards = state.localCards;
+  }
+}
+
 function saveState() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify({ cards: state.cards })); } catch(e) {}
+  if (FIREBASE_ENABLED && state.user && db && !state.isApplyingCloudSnapshot) {
+    queueCloudSave();
+  }
+  updateAuthUi();
+}
+
+function initFirebase() {
+  if (!FIREBASE_ENABLED) { updateAuthUi(); return; }
+  if (typeof firebase === 'undefined') {
+    setSyncStatus('Firebase 로드 실패', 'warn');
+    state.authChecked = true;
+    render();
+    return;
+  }
+  try {
+    firebaseApp = firebase.initializeApp(FIREBASE_CONFIG);
+    auth = firebase.auth();
+    db = firebase.firestore();
+    auth.onAuthStateChanged(user => {
+      state.authChecked = true;
+      state.user = user;
+      if (state.unsubscribeCloud) { state.unsubscribeCloud(); state.unsubscribeCloud = null; }
+      if (user) {
+        subscribeCloudCards(user.uid);
+      } else {
+        state.cards = [];
+        state.cloudLoaded = false;
+        updateAuthUi();
+        render();
+      }
+    });
+  } catch(e) {
+    console.error(e);
+    setSyncStatus('Firebase 설정 오류', 'warn');
+    state.authChecked = true;
+    render();
+  }
+}
+
+function cloudDocRef(uid) {
+  return db.collection('users').doc(uid).collection('appState').doc('main');
+}
+
+function subscribeCloudCards(uid) {
+  setSyncStatus('클라우드 불러오는 중', 'warn');
+  state.cloudLoaded = false;
+  state.unsubscribeCloud = cloudDocRef(uid).onSnapshot(doc => {
+    state.isApplyingCloudSnapshot = true;
+    const data = doc.exists ? doc.data() : null;
+    state.cards = Array.isArray(data?.cards) ? data.cards : [];
+    state.cloudLoaded = true;
+    state.isApplyingCloudSnapshot = false;
+    setSyncStatus('클라우드 동기화됨', 'cloud');
+    updateAuthUi();
+    render();
+  }, err => {
+    console.error(err);
+    setSyncStatus('동기화 오류', 'warn');
+    alert('클라우드 데이터를 불러오지 못했습니다. Firebase 설정과 보안 규칙을 확인해주세요.');
+  });
+}
+
+function queueCloudSave() {
+  if (!state.user || !db) return;
+  setSyncStatus('저장 중', 'warn');
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(saveCloudState, 350);
+}
+
+function saveCloudState() {
+  if (!state.user || !db) return;
+  cloudDocRef(state.user.uid).set({
+    cards: state.cards,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge: true }).then(() => {
+    setSyncStatus('클라우드 동기화됨', 'cloud');
+  }).catch(err => {
+    console.error(err);
+    setSyncStatus('저장 실패', 'warn');
+    alert('클라우드 저장에 실패했습니다. Firebase 설정과 보안 규칙을 확인해주세요.');
+  });
+}
+
+function setSyncStatus(text, mode) {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('cloud', mode === 'cloud');
+  el.classList.toggle('warn', mode === 'warn');
+}
+
+function updateAuthUi() {
+  const loginBtn = document.getElementById('login-btn');
+  const logoutBtn = document.getElementById('logout-btn');
+  const migrateBtn = document.getElementById('migrate-btn');
+  if (!loginBtn || !logoutBtn || !migrateBtn) return;
+
+  if (!FIREBASE_ENABLED) {
+    setSyncStatus('로컬 저장', '');
+    loginBtn.style.display = 'inline-flex';
+    loginBtn.textContent = '클라우드 설정 전';
+    logoutBtn.style.display = 'none';
+    migrateBtn.style.display = 'none';
+    return;
+  }
+
+  if (!state.authChecked) {
+    setSyncStatus('로그인 확인 중', 'warn');
+    loginBtn.style.display = 'none';
+    logoutBtn.style.display = 'none';
+    migrateBtn.style.display = 'none';
+    return;
+  }
+
+  if (state.user) {
+    loginBtn.style.display = 'none';
+    logoutBtn.style.display = 'inline-flex';
+    logoutBtn.textContent = `로그아웃`;
+    const hasLocalOnly = state.localCards.length > 0;
+    migrateBtn.style.display = hasLocalOnly ? 'inline-flex' : 'none';
+    if (!document.getElementById('sync-status').textContent.includes('저장')) {
+      setSyncStatus(`${state.user.email || '로그인'} · 클라우드`, 'cloud');
+    }
+  } else {
+    setSyncStatus('로그인 필요', 'warn');
+    loginBtn.style.display = 'inline-flex';
+    loginBtn.textContent = '로그인';
+    logoutBtn.style.display = 'none';
+    migrateBtn.style.display = 'none';
+  }
+}
+
+function renderLoginPrompt() {
+  if (!FIREBASE_ENABLED) return '';
+  if (!state.authChecked) {
+    return `<div class="auth-box"><h2>로그인 확인 중</h2><p>잠시만 기다려주세요.</p></div>`;
+  }
+  return `<div class="auth-box">
+    <h2>로그인이 필요합니다</h2>
+    <p>PC·모바일·태블릿에서 같은 체험단 데이터를 보려면 같은 계정으로 로그인해야 합니다.</p>
+    <button class="btn primary" onclick="openAuthModal()">로그인 / 회원가입</button>
+    <div class="auth-note">Firebase 설정이 끝난 뒤 사용할 수 있습니다. 설정 전에는 기존 로컬 저장 방식으로만 동작합니다.</div>
+  </div>`;
+}
+
+function requireAccess() {
+  if (FIREBASE_ENABLED && !state.user) {
+    openAuthModal();
+    return false;
+  }
+  return true;
+}
+
+function openAuthModal() {
+  if (!FIREBASE_ENABLED) {
+    alert('아직 Firebase 설정값이 입력되지 않았습니다. HTML 파일 상단의 FIREBASE_CONFIG를 먼저 수정해주세요.');
+    return;
+  }
+  document.getElementById('auth-error').textContent = '';
+  document.getElementById('auth-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('auth-email').focus(), 30);
+}
+
+function closeAuthModal() {
+  document.getElementById('auth-overlay').classList.remove('open');
+}
+
+function authValues() {
+  return {
+    email: document.getElementById('auth-email').value.trim(),
+    password: document.getElementById('auth-password').value
+  };
+}
+
+function showAuthError(err) {
+  const msg = err?.message || String(err || '알 수 없는 오류가 발생했습니다.');
+  document.getElementById('auth-error').textContent = msg;
+}
+
+async function handleLogin() {
+  if (!auth) return openAuthModal();
+  const { email, password } = authValues();
+  if (!email || !password) { document.getElementById('auth-error').textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
+  try {
+    await auth.signInWithEmailAndPassword(email, password);
+    closeAuthModal();
+  } catch(e) { showAuthError(e); }
+}
+
+async function handleSignup() {
+  if (!auth) return openAuthModal();
+  const { email, password } = authValues();
+  if (!email || !password) { document.getElementById('auth-error').textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
+  if (password.length < 6) { document.getElementById('auth-error').textContent = '비밀번호는 6자 이상이어야 합니다.'; return; }
+  try {
+    await auth.createUserWithEmailAndPassword(email, password);
+    closeAuthModal();
+  } catch(e) { showAuthError(e); }
+}
+
+async function handleLogout() {
+  if (!auth) return;
+  await auth.signOut();
+}
+
+function migrateLocalToCloud() {
+  if (!state.user || !db) { openAuthModal(); return; }
+  const local = state.localCards || [];
+  if (!local.length) { alert('옮길 로컬 데이터가 없습니다.'); return; }
+  const merge = confirm(`현재 브라우저에 저장된 로컬 카드 ${local.length}개를 클라우드에 올릴까요?\n\n[확인] 기존 클라우드 데이터에 추가\n[취소] 작업 취소`);
+  if (!merge) return;
+  const ids = new Set(state.cards.map(c => c.id));
+  const added = local.filter(c => !ids.has(c.id));
+  state.cards = [...state.cards, ...added];
+  state.localCards = [];
+  saveState();
+  render();
+  alert(`${added.length}개를 클라우드에 추가했습니다. 중복 ${local.length - added.length}개는 제외했습니다.`);
 }
 
 // ─────────────────────────────────────────────
@@ -327,9 +619,15 @@ function statusTag(s) {
 // ─────────────────────────────────────────────
 function render() {
   const el = document.getElementById('main-content');
+  if (FIREBASE_ENABLED && !state.user) {
+    el.innerHTML = renderLoginPrompt();
+    updateAuthUi();
+    return;
+  }
   if (state.tab === 'active')     el.innerHTML = renderActive();
   else if (state.tab === 'calendar') el.innerHTML = renderCalendar();
   else                               el.innerHTML = renderCompleted();
+  updateAuthUi();
 }
 
 // ─────────────────────────────────────────────
@@ -580,6 +878,7 @@ function deleteCard(id) {
 const FIELDS = ['f-name','f-phone','f-addr','f-url','f-agency','f-benefit','f-start','f-end','f-keywords'];
 
 function openAddModal() {
+  if (!requireAccess()) return;
   state.editTargetId = null;
   FIELDS.forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
   document.getElementById('modal-title').textContent = '📝 체험단 추가';
@@ -650,6 +949,7 @@ function saveEdit() {
 //  MESSAGE MODAL
 // ─────────────────────────────────────────────
 function openMsgModal(id) {
+  if (!requireAccess()) return;
   const c = state.cards.find(x => x.id === id);
   if (!c) return;
   state.msgTargetId = id;
@@ -730,6 +1030,7 @@ function formatKoreanDate(dateStr) {
 //  SCHEDULE MODAL
 // ─────────────────────────────────────────────
 function openSchedModal(id) {
+  if (!requireAccess()) return;
   const c = state.cards.find(x => x.id === id);
   if (!c) return;
   state.schedTargetId = id;
@@ -827,6 +1128,7 @@ function openGcal(cardId) {
 //  BACKUP / IMPORT
 // ─────────────────────────────────────────────
 function exportData() {
+  if (!requireAccess()) return;
   if (!state.cards.length) { alert('저장된 데이터가 없습니다.'); return; }
   const blob = new Blob([JSON.stringify({ version:1, exportedAt:new Date().toISOString(), cards:state.cards }, null, 2)], { type:'application/json' });
   const a = document.createElement('a');
@@ -836,6 +1138,7 @@ function exportData() {
 }
 
 function importData(e) {
+  if (!requireAccess()) { e.target.value = ''; return; }
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
@@ -871,15 +1174,17 @@ function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&
 function escAttr(s) { return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 // 오버레이 바깥 클릭
+document.getElementById('auth-overlay').addEventListener('click', function(e){ if(e.target===this) closeAuthModal(); });
 document.getElementById('add-overlay').addEventListener('click', function(e){ if(e.target===this) closeAddModal(); });
 document.getElementById('sched-overlay').addEventListener('click', function(e){ if(e.target===this) closeSchedModal(); });
 document.getElementById('msg-overlay').addEventListener('click', function(e){ if(e.target===this) closeMsgModal(); });
-document.addEventListener('keydown', e => { if(e.key==='Escape'){ closeAddModal(); closeSchedModal(); closeMsgModal(); } });
+document.addEventListener('keydown', e => { if(e.key==='Escape'){ closeAuthModal(); closeAddModal(); closeSchedModal(); closeMsgModal(); } });
 
 // ─────────────────────────────────────────────
 //  INIT
 // ─────────────────────────────────────────────
 loadState();
+initFirebase();
 render();
 </script>
 </body>
