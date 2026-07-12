@@ -464,6 +464,88 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
   }
 }
 
+
+/* ─────────────────────────────────────────────
+   SCROLL COMPACT TOPBAR
+   - 모바일/태블릿에서 스크롤 시작 시 상단 메뉴를 간소화
+   - 로고 + 체험단 추가 버튼만 남겨 화면 점유율 축소
+───────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .topbar{
+    transition:padding .18s ease, min-height .18s ease, box-shadow .18s ease, gap .18s ease;
+  }
+  .topbar .topbar-logo,
+  .topbar .nav-tabs,
+  .topbar .topbar-actions,
+  .topbar #add-btn{
+    transition:all .18s ease;
+  }
+  .topbar.compact{
+    min-height:56px;
+    height:56px;
+    padding:8px 14px;
+    flex-wrap:nowrap;
+    align-items:center;
+    gap:10px;
+    box-shadow:0 2px 12px rgba(0,0,0,.08);
+    overflow:hidden;
+  }
+  .topbar.compact .topbar-logo{
+    flex:1 1 auto;
+    min-height:auto;
+    font-size:15px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .topbar.compact .topbar-logo svg{
+    width:21px;
+    height:21px;
+  }
+  .topbar.compact .nav-tabs,
+  .topbar.compact .sync-pill,
+  .topbar.compact #login-btn,
+  .topbar.compact #diag-btn,
+  .topbar.compact #logout-btn,
+  .topbar.compact #migrate-btn,
+  .topbar.compact #export-btn,
+  .topbar.compact #import-btn{
+    display:none !important;
+  }
+  .topbar.compact .topbar-actions{
+    order:0;
+    margin-left:auto;
+    width:auto;
+    display:flex;
+    flex:0 0 auto;
+    gap:0;
+  }
+  .topbar.compact #add-btn{
+    display:inline-flex !important;
+    width:auto;
+    min-height:40px;
+    padding:0 18px;
+    border-radius:10px;
+    font-size:14px;
+    grid-column:auto;
+    justify-content:center;
+    flex:0 0 auto;
+  }
+}
+
+@media (max-width: 420px) {
+  .topbar.compact{
+    padding:8px 10px;
+  }
+  .topbar.compact .topbar-logo{
+    font-size:14px;
+  }
+  .topbar.compact #add-btn{
+    min-height:38px;
+    padding:0 14px;
+    font-size:13px;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -1718,12 +1800,37 @@ document.getElementById('sched-overlay').addEventListener('click', function(e){ 
 document.getElementById('msg-overlay').addEventListener('click', function(e){ if(e.target===this) closeMsgModal(); });
 document.addEventListener('keydown', e => { if(e.key==='Escape'){ closeAuthModal(); closeAddModal(); closeSchedModal(); closeMsgModal(); } });
 
+
+// ─────────────────────────────────────────────
+//  SCROLL COMPACT TOPBAR
+//  모바일/태블릿에서 스크롤 시 상단바를 로고 + 체험단 추가 버튼만 남김
+// ─────────────────────────────────────────────
+function updateCompactTopbar() {
+  const topbar = document.querySelector('.topbar');
+  if (!topbar) return;
+  const shouldCompact = window.innerWidth <= 1024 && window.scrollY > 24;
+  topbar.classList.toggle('compact', shouldCompact);
+}
+
+let compactTopbarRaf = null;
+function requestCompactTopbarUpdate() {
+  if (compactTopbarRaf) return;
+  compactTopbarRaf = requestAnimationFrame(() => {
+    compactTopbarRaf = null;
+    updateCompactTopbar();
+  });
+}
+
+window.addEventListener('scroll', requestCompactTopbarUpdate, { passive: true });
+window.addEventListener('resize', requestCompactTopbarUpdate);
+
 // ─────────────────────────────────────────────
 //  INIT
 // ─────────────────────────────────────────────
 loadState();
 initFirebase();
 render();
+updateCompactTopbar();
 setTimeout(() => {
   const main = document.getElementById('main-content');
   if (main && !main.innerHTML.trim()) {
