@@ -152,6 +152,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
 .auth-note{background:#f8f7ff;border:1px solid #dedaf8;color:#3d35a8;border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.6;text-align:left;margin-top:14px}
 .auth-modal{width:420px}
 .auth-error{font-size:12px;color:#d44;line-height:1.5;min-height:18px;margin-top:8px}
+.phone-copy-btn{margin-left:8px;padding:3px 8px;border-radius:6px;border:1px solid #7b2cff;background:#7b00ff;color:#fff;font-size:12px;line-height:1.2;cursor:pointer;font-family:inherit;font-weight:600;white-space:nowrap}
+.phone-copy-btn:hover{background:#5f00c8;border-color:#5f00c8}
+.card-row.phone-row{align-items:center;flex-wrap:wrap}
+.firebase-diagnostics{background:#f8f8fb;border:1px solid #e4e2f3;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.7;white-space:pre-wrap;text-align:left;color:#333;margin-top:10px;max-height:230px;overflow:auto}
 .cloud-hint{font-size:11px;color:#999;line-height:1.5;margin-top:6px}
 
 </style>
@@ -176,11 +180,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
     <button class="btn" id="login-btn" onclick="openAuthModal()">로그인</button>
     <button class="btn" id="logout-btn" onclick="handleLogout()" style="display:none">로그아웃</button>
     <button class="btn" id="migrate-btn" onclick="migrateLocalToCloud()" style="display:none">로컬→클라우드</button>
-    <button class="btn" onclick="exportData()">⬇ 백업</button>
-    <label class="btn" style="cursor:pointer">⬆ 불러오기
-      <input type="file" id="import-input" accept=".json" style="display:none" onchange="importData(event)">
-    </label>
-    <button class="btn primary" onclick="openAddModal()">＋ 체험단 추가</button>
+    <button class="btn" id="export-btn" onclick="exportData()">⬇ 백업</button>
+    <button class="btn" id="import-btn" onclick="triggerImport()">⬆ 불러오기</button>
+    <input type="file" id="import-input" accept=".json" style="display:none" onchange="importData(event)">
+    <button class="btn primary" id="add-btn" onclick="openAddModal()">＋ 체험단 추가</button>
   </div>
 </div>
 
@@ -321,12 +324,31 @@ const firebaseConfig = {
   measurementId: "G-DWJPVL8QBK"
 };
 
+function sanitizeFirebaseConfig(config) {
+  const cleaned = { ...config };
+  Object.keys(cleaned).forEach(key => {
+    if (typeof cleaned[key] === 'string') cleaned[key] = cleaned[key].trim();
+  });
+  if (cleaned.authDomain) cleaned.authDomain = cleaned.authDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return cleaned;
+}
 
-const FIREBASE_ENABLED = !!(FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.includes('YOUR_'));
+Object.assign(FIREBASE_CONFIG, sanitizeFirebaseConfig(FIREBASE_CONFIG));
+
+function hasFirebaseConfig(config) {
+  const required = ['apiKey', 'authDomain', 'projectId', 'appId'];
+  return required.every(key => {
+    const value = String(config[key] || '').trim();
+    return value && !value.includes('YOUR_') && !value.includes('YOUR-');
+  });
+}
+
+const FIREBASE_ENABLED = hasFirebaseConfig(FIREBASE_CONFIG);
 let firebaseApp = null;
 let auth = null;
 let db = null;
 let cloudSaveTimer = null;
+let firebaseInitError = '';
 
 let state = {
   tab: 'active',
@@ -373,6 +395,7 @@ function saveState() {
 function initFirebase() {
   if (!FIREBASE_ENABLED) { updateAuthUi(); return; }
   if (typeof firebase === 'undefined') {
+    firebaseInitError = 'Firebase 라이브러리를 불러오지 못했습니다. 인터넷 연결 또는 브라우저 차단 설정을 확인해주세요.';
     setSyncStatus('Firebase 로드 실패', 'warn');
     state.authChecked = true;
     render();
@@ -397,6 +420,7 @@ function initFirebase() {
     });
   } catch(e) {
     console.error(e);
+    firebaseInitError = e?.message || 'Firebase 설정 오류가 발생했습니다.';
     setSyncStatus('Firebase 설정 오류', 'warn');
     state.authChecked = true;
     render();
@@ -421,8 +445,12 @@ function subscribeCloudCards(uid) {
     render();
   }, err => {
     console.error(err);
+    state.isApplyingCloudSnapshot = false;
+    state.cloudLoaded = true;
     setSyncStatus('동기화 오류', 'warn');
-    alert('클라우드 데이터를 불러오지 못했습니다. Firebase 설정과 보안 규칙을 확인해주세요.');
+    updateAuthUi();
+    render();
+    alert(friendlyFirestoreError(err));
   });
 }
 
@@ -447,6 +475,14 @@ function saveCloudState() {
   });
 }
 
+function friendlyFirestoreError(err) {
+  const code = err?.code || '';
+  if (code === 'permission-denied') return 'Firestore 접근 권한이 거부되었습니다. Firestore Database > Rules에 사용자 UID 규칙을 게시했는지 확인해주세요.';
+  if (code === 'not-found') return 'Firestore Database가 아직 만들어지지 않았을 수 있습니다. Firebase Console에서 Firestore Database를 먼저 생성해주세요.';
+  if (code === 'unavailable') return 'Firestore 서버에 연결하지 못했습니다. 네트워크 상태 또는 브라우저 차단 설정을 확인해주세요.';
+  return '클라우드 데이터를 불러오지 못했습니다. Firebase 설정, Firestore Database 생성, 보안 규칙을 확인해주세요. 오류: ' + (err?.message || code || '알 수 없음');
+}
+
 function setSyncStatus(text, mode) {
   const el = document.getElementById('sync-status');
   if (!el) return;
@@ -459,7 +495,14 @@ function updateAuthUi() {
   const loginBtn = document.getElementById('login-btn');
   const logoutBtn = document.getElementById('logout-btn');
   const migrateBtn = document.getElementById('migrate-btn');
+  const exportBtn = document.getElementById('export-btn');
+  const importBtn = document.getElementById('import-btn');
+  const addBtn = document.getElementById('add-btn');
   if (!loginBtn || !logoutBtn || !migrateBtn) return;
+
+  const setDataButtons = (visible) => {
+    [exportBtn, importBtn, addBtn].forEach(btn => { if (btn) btn.style.display = visible ? 'inline-flex' : 'none'; });
+  };
 
   if (!FIREBASE_ENABLED) {
     setSyncStatus('로컬 저장', '');
@@ -467,6 +510,7 @@ function updateAuthUi() {
     loginBtn.textContent = '클라우드 설정 전';
     logoutBtn.style.display = 'none';
     migrateBtn.style.display = 'none';
+    setDataButtons(true);
     return;
   }
 
@@ -475,6 +519,17 @@ function updateAuthUi() {
     loginBtn.style.display = 'none';
     logoutBtn.style.display = 'none';
     migrateBtn.style.display = 'none';
+    setDataButtons(false);
+    return;
+  }
+
+  if (firebaseInitError) {
+    setSyncStatus('Firebase 설정 오류', 'warn');
+    loginBtn.style.display = 'inline-flex';
+    loginBtn.textContent = '설정 오류 확인';
+    logoutBtn.style.display = 'none';
+    migrateBtn.style.display = 'none';
+    setDataButtons(false);
     return;
   }
 
@@ -484,7 +539,9 @@ function updateAuthUi() {
     logoutBtn.textContent = `로그아웃`;
     const hasLocalOnly = state.localCards.length > 0;
     migrateBtn.style.display = hasLocalOnly ? 'inline-flex' : 'none';
-    if (!document.getElementById('sync-status').textContent.includes('저장')) {
+    setDataButtons(true);
+    const curStatus = document.getElementById('sync-status')?.textContent || '';
+    if (!curStatus.includes('저장') && !curStatus.includes('불러오는 중')) {
       setSyncStatus(`${state.user.email || '로그인'} · 클라우드`, 'cloud');
     }
   } else {
@@ -493,6 +550,7 @@ function updateAuthUi() {
     loginBtn.textContent = '로그인';
     logoutBtn.style.display = 'none';
     migrateBtn.style.display = 'none';
+    setDataButtons(false);
   }
 }
 
@@ -501,11 +559,19 @@ function renderLoginPrompt() {
   if (!state.authChecked) {
     return `<div class="auth-box"><h2>로그인 확인 중</h2><p>잠시만 기다려주세요.</p></div>`;
   }
+  if (firebaseInitError) {
+    return `<div class="auth-box">
+      <h2>Firebase 설정 오류</h2>
+      <p>${escHtml(firebaseInitError)}</p>
+      <button class="btn primary" onclick="openAuthModal()">오류 확인</button>
+      <div class="auth-note">Firebase 설정값, Authentication Email/Password 사용 설정, Firestore 보안 규칙, Authorized domains를 확인하세요.</div>
+    </div>`;
+  }
   return `<div class="auth-box">
     <h2>로그인이 필요합니다</h2>
     <p>PC·모바일·태블릿에서 같은 체험단 데이터를 보려면 같은 계정으로 로그인해야 합니다.</p>
     <button class="btn primary" onclick="openAuthModal()">로그인 / 회원가입</button>
-    <div class="auth-note">Firebase 설정이 끝난 뒤 사용할 수 있습니다. 설정 전에는 기존 로컬 저장 방식으로만 동작합니다.</div>
+    <div class="auth-note">로그인 후 백업 파일 불러오기, 카드 추가, 수정, 삭제 기능을 사용할 수 있습니다.</div>
   </div>`;
 }
 
@@ -518,13 +584,30 @@ function requireAccess() {
 }
 
 function openAuthModal() {
-  if (!FIREBASE_ENABLED) {
-    alert('아직 Firebase 설정값이 입력되지 않았습니다. HTML 파일 상단의 FIREBASE_CONFIG를 먼저 수정해주세요.');
+  const overlay = document.getElementById('auth-overlay');
+  const errEl = document.getElementById('auth-error');
+  if (!overlay || !errEl) {
+    alert('로그인 창을 찾지 못했습니다. index.html 파일이 정상 업로드되었는지 확인해주세요.');
     return;
   }
-  document.getElementById('auth-error').textContent = '';
-  document.getElementById('auth-overlay').classList.add('open');
-  setTimeout(() => document.getElementById('auth-email').focus(), 30);
+  errEl.textContent = '';
+  overlay.classList.add('open');
+
+  if (!FIREBASE_ENABLED) {
+    errEl.textContent = 'Firebase 설정값이 아직 입력되지 않았습니다. HTML 파일의 FIREBASE_CONFIG를 먼저 수정해주세요.';
+    return;
+  }
+  if (firebaseInitError) {
+    errEl.textContent = firebaseInitError;
+    return;
+  }
+  if (!auth) {
+    errEl.textContent = 'Firebase 초기화 중입니다. 잠시 후 다시 시도해주세요.';
+  }
+  setTimeout(() => {
+    const emailEl = document.getElementById('auth-email');
+    if (emailEl) emailEl.focus();
+  }, 30);
 }
 
 function closeAuthModal() {
@@ -538,28 +621,83 @@ function authValues() {
   };
 }
 
+function friendlyAuthError(err) {
+  const code = err?.code || '';
+  if (code === 'auth/operation-not-allowed') return 'Firebase Authentication에서 Email/Password 로그인을 사용 설정해야 합니다.';
+  if (code === 'auth/unauthorized-domain') return '현재 GitHub Pages 주소가 Firebase Authentication의 Authorized domains에 등록되지 않았습니다.';
+  if (code === 'auth/invalid-email') return '이메일 형식이 올바르지 않습니다.';
+  if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') return '이메일 또는 비밀번호가 맞지 않습니다. 처음 사용하는 계정이면 회원가입을 먼저 눌러주세요.';
+  if (code === 'auth/email-already-in-use') return '이미 가입된 이메일입니다. 로그인 버튼을 눌러주세요.';
+  if (code === 'auth/weak-password') return '비밀번호는 6자 이상이어야 합니다.';
+  return err?.message || String(err || '알 수 없는 오류가 발생했습니다.');
+}
+
 function showAuthError(err) {
-  const msg = err?.message || String(err || '알 수 없는 오류가 발생했습니다.');
-  document.getElementById('auth-error').textContent = msg;
+  document.getElementById('auth-error').textContent = friendlyAuthError(err);
+}
+
+async function runFirebaseDiagnostics() {
+  const box = document.getElementById('firebase-diagnostics');
+  if (!box) return;
+  box.style.display = 'block';
+  const lines = [];
+  const ok = (v) => v ? '✅' : '❌';
+  lines.push('현재 도메인: ' + (location.hostname || '(로컬 파일)'));
+  lines.push('현재 주소: ' + location.href);
+  lines.push(ok(FIREBASE_ENABLED) + ' Firebase config 입력 여부');
+  lines.push(ok(typeof firebase !== 'undefined') + ' Firebase SDK 로드 여부');
+  lines.push(ok(!!auth) + ' Authentication 초기화 여부');
+  lines.push(ok(!!db) + ' Firestore 초기화 여부');
+  lines.push('projectId: ' + (FIREBASE_CONFIG.projectId || '-'));
+  lines.push('authDomain: ' + (FIREBASE_CONFIG.authDomain || '-'));
+  if (firebaseInitError) lines.push('초기화 오류: ' + firebaseInitError);
+  if (!FIREBASE_ENABLED) lines.push('조치: HTML의 FIREBASE_CONFIG 값에서 YOUR_*를 실제 Firebase 값으로 교체해야 합니다.');
+  if (FIREBASE_ENABLED && location.hostname) lines.push('확인: Firebase Authentication > Settings > Authorized domains에 ' + location.hostname + ' 을 추가하세요.');
+  if (FIREBASE_ENABLED) lines.push('확인: Authentication > Sign-in method > Email/Password가 사용 설정되어 있어야 합니다.');
+  if (state.user) lines.push('로그인 사용자: ' + (state.user.email || state.user.uid));
+  else lines.push('로그인 사용자: 없음. Firestore 쓰기 테스트는 로그인 후 가능합니다.');
+  box.textContent = lines.join('\n') + '\n\n점검 중...';
+
+  if (FIREBASE_ENABLED && state.user && db) {
+    try {
+      await cloudDocRef(state.user.uid).set({ diagnostics: { checkedAt: firebase.firestore.FieldValue.serverTimestamp(), host: location.hostname } }, { merge: true });
+      const snap = await cloudDocRef(state.user.uid).get();
+      box.textContent = lines.join('\n') + '\n\n✅ Firestore 읽기/쓰기 테스트 성공\n현재 Firebase 연결은 정상입니다.';
+    } catch(e) {
+      box.textContent = lines.join('\n') + '\n\n❌ Firestore 읽기/쓰기 테스트 실패\n' + friendlyFirestoreError(e) + '\n원본 오류: ' + (e?.code || '') + ' ' + (e?.message || '');
+    }
+  } else {
+    box.textContent = lines.join('\n') + '\n\nFirestore 읽기/쓰기 테스트는 로그인 후 다시 누르면 실행됩니다.';
+  }
 }
 
 async function handleLogin() {
-  if (!auth) return openAuthModal();
+  const errEl = document.getElementById('auth-error');
+  if (!FIREBASE_ENABLED) { errEl.textContent = 'Firebase 설정값이 입력되지 않았습니다.'; return; }
+  if (firebaseInitError) { errEl.textContent = firebaseInitError; return; }
+  if (!auth) { errEl.textContent = 'Firebase 초기화 중입니다. 잠시 후 다시 시도해주세요.'; return; }
   const { email, password } = authValues();
-  if (!email || !password) { document.getElementById('auth-error').textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
+  if (!email || !password) { errEl.textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
   try {
+    errEl.textContent = '로그인 중입니다...';
     await auth.signInWithEmailAndPassword(email, password);
+    errEl.textContent = '';
     closeAuthModal();
   } catch(e) { showAuthError(e); }
 }
 
 async function handleSignup() {
-  if (!auth) return openAuthModal();
+  const errEl = document.getElementById('auth-error');
+  if (!FIREBASE_ENABLED) { errEl.textContent = 'Firebase 설정값이 입력되지 않았습니다.'; return; }
+  if (firebaseInitError) { errEl.textContent = firebaseInitError; return; }
+  if (!auth) { errEl.textContent = 'Firebase 초기화 중입니다. 잠시 후 다시 시도해주세요.'; return; }
   const { email, password } = authValues();
-  if (!email || !password) { document.getElementById('auth-error').textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
-  if (password.length < 6) { document.getElementById('auth-error').textContent = '비밀번호는 6자 이상이어야 합니다.'; return; }
+  if (!email || !password) { errEl.textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
+  if (password.length < 6) { errEl.textContent = '비밀번호는 6자 이상이어야 합니다.'; return; }
   try {
+    errEl.textContent = '회원가입 중입니다...';
     await auth.createUserWithEmailAndPassword(email, password);
+    errEl.textContent = '';
     closeAuthModal();
   } catch(e) { showAuthError(e); }
 }
@@ -679,7 +817,7 @@ function renderCardHTML(c) {
       ${statusTag(status)}
     </div>
     <div class="card-body">
-      ${c.phone   ? `<div class="card-row"><span class="card-row-icon">📞</span><span class="card-row-val">${escHtml(c.phone)}</span></div>` : ''}
+      ${c.phone   ? `<div class="card-row phone-row"><span class="card-row-icon">📞</span><span class="card-row-val">${escHtml(c.phone)}</span><button class="phone-copy-btn" type="button" data-phone="${escAttr(c.phone)}" onclick="copyPhoneFromBtn(this)">복사</button></div>` : ''}
       ${c.benefit ? `<div class="card-row"><span class="card-row-icon">🎁</span><span class="card-row-val">${escHtml(c.benefit)}</span></div>` : ''}
       ${(c.startDate||c.endDate) ? `<div class="card-row"><span class="card-row-icon">📆</span><span class="card-row-val">${escHtml((c.startDate||'')+(c.startDate&&c.endDate?' ~ ':'')+(c.endDate||''))}</span></div>` : ''}
       ${visitRow}
@@ -1129,6 +1267,7 @@ function openGcal(cardId) {
 // ─────────────────────────────────────────────
 function exportData() {
   if (!requireAccess()) return;
+  if (FIREBASE_ENABLED && state.user && !state.cloudLoaded) { alert('클라우드 데이터를 불러오는 중입니다. 잠시 후 다시 시도해주세요.'); return; }
   if (!state.cards.length) { alert('저장된 데이터가 없습니다.'); return; }
   const blob = new Blob([JSON.stringify({ version:1, exportedAt:new Date().toISOString(), cards:state.cards }, null, 2)], { type:'application/json' });
   const a = document.createElement('a');
@@ -1137,8 +1276,18 @@ function exportData() {
   a.click(); URL.revokeObjectURL(a.href);
 }
 
+function triggerImport() {
+  if (!requireAccess()) return;
+  if (FIREBASE_ENABLED && state.user && !state.cloudLoaded) { alert('클라우드 데이터를 불러오는 중입니다. 잠시 후 다시 시도해주세요.'); return; }
+  const input = document.getElementById('import-input');
+  if (!input) { alert('파일 불러오기 입력창을 찾지 못했습니다.'); return; }
+  input.value = '';
+  input.click();
+}
+
 function importData(e) {
   if (!requireAccess()) { e.target.value = ''; return; }
+  if (FIREBASE_ENABLED && state.user && !state.cloudLoaded) { alert('클라우드 데이터를 불러오는 중입니다. 잠시 후 다시 시도해주세요.'); e.target.value=''; return; }
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
@@ -1168,6 +1317,33 @@ function importData(e) {
 // ─────────────────────────────────────────────
 //  UTILS
 // ─────────────────────────────────────────────
+async function copyPlainText(text, successMessage) {
+  const value = String(text || '').trim();
+  if (!value) { alert('복사할 내용이 없습니다.'); return; }
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = value;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    alert(successMessage || '복사되었습니다.');
+  } catch(e) {
+    alert('복사에 실패했습니다. 직접 선택해서 복사해주세요.');
+  }
+}
+
+function copyPhoneFromBtn(btn) {
+  copyPlainText(btn?.dataset?.phone || '', '전화번호가 복사되었습니다.');
+}
+
 function pad(n) { return String(n).padStart(2,'0'); }
 function uid()  { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -1175,6 +1351,8 @@ function escAttr(s) { return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'
 
 // 오버레이 바깥 클릭
 document.getElementById('auth-overlay').addEventListener('click', function(e){ if(e.target===this) closeAuthModal(); });
+document.getElementById('auth-password').addEventListener('keydown', function(e){ if(e.key==='Enter') handleLogin(); });
+document.getElementById('auth-email').addEventListener('keydown', function(e){ if(e.key==='Enter') document.getElementById('auth-password').focus(); });
 document.getElementById('add-overlay').addEventListener('click', function(e){ if(e.target===this) closeAddModal(); });
 document.getElementById('sched-overlay').addEventListener('click', function(e){ if(e.target===this) closeSchedModal(); });
 document.getElementById('msg-overlay').addEventListener('click', function(e){ if(e.target===this) closeMsgModal(); });
