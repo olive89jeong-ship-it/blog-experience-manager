@@ -178,6 +178,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
   <div class="topbar-actions">
     <span class="sync-pill" id="sync-status">로컬 저장</span>
     <button class="btn" id="login-btn" onclick="openAuthModal()">로그인</button>
+    <button class="btn" id="diag-btn" onclick="openAuthModal(); setTimeout(runFirebaseDiagnostics, 80)">점검</button>
     <button class="btn" id="logout-btn" onclick="handleLogout()" style="display:none">로그아웃</button>
     <button class="btn" id="migrate-btn" onclick="migrateLocalToCloud()" style="display:none">로컬→클라우드</button>
     <button class="btn" id="export-btn" onclick="exportData()">⬇ 백업</button>
@@ -196,9 +197,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
     <div class="field"><label>이메일</label><input id="auth-email" type="email" placeholder="예: your@email.com" autocomplete="email"/></div>
     <div class="field"><label>비밀번호</label><input id="auth-password" type="password" placeholder="6자 이상" autocomplete="current-password"/></div>
     <div class="auth-error" id="auth-error"></div>
+    <div class="cloud-hint">Firebase 로그인은 아이디가 아니라 이메일 형식으로 입력해야 합니다. 예: yourname@gmail.com</div>
     <div class="cloud-hint">같은 계정으로 PC·모바일·태블릿에서 로그인하면 같은 체험단 데이터를 볼 수 있습니다.</div>
+    <div id="firebase-diagnostics" class="firebase-diagnostics" style="display:none"></div>
     <div class="modal-btns">
       <button class="btn" onclick="closeAuthModal()">닫기</button>
+      <button class="btn" onclick="runFirebaseDiagnostics()">Firebase 점검</button>
       <button class="btn" onclick="handleSignup()">회원가입</button>
       <button class="btn primary" onclick="handleLogin()">로그인</button>
     </div>
@@ -314,7 +318,7 @@ const STORE_KEY = 'blog_exp_v2';
 
 // Firebase 설정값을 본인 프로젝트 값으로 바꾸면 클라우드 동기화가 켜집니다.
 // 설정 전에는 기존처럼 이 브라우저에만 저장되는 로컬 모드로 동작합니다.
-const firebaseConfig = {
+const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBMaXY6nn2_wuv2YmpS69R1vZhV6gy0N5Q",
   authDomain: "blogexperience-c39b0.firebaseapp.com",
   projectId: "blogexperience-c39b0",
@@ -418,6 +422,14 @@ function initFirebase() {
         render();
       }
     });
+    setTimeout(() => {
+      if (FIREBASE_ENABLED && !state.authChecked && !firebaseInitError) {
+        state.authChecked = true;
+        setSyncStatus('로그인 상태 확인 지연', 'warn');
+        updateAuthUi();
+        render();
+      }
+    }, 5000);
   } catch(e) {
     console.error(e);
     firebaseInitError = e?.message || 'Firebase 설정 오류가 발생했습니다.';
@@ -498,6 +510,7 @@ function updateAuthUi() {
   const exportBtn = document.getElementById('export-btn');
   const importBtn = document.getElementById('import-btn');
   const addBtn = document.getElementById('add-btn');
+  const diagBtn = document.getElementById('diag-btn');
   if (!loginBtn || !logoutBtn || !migrateBtn) return;
 
   const setDataButtons = (visible) => {
@@ -510,6 +523,7 @@ function updateAuthUi() {
     loginBtn.textContent = '클라우드 설정 전';
     logoutBtn.style.display = 'none';
     migrateBtn.style.display = 'none';
+    if (diagBtn) diagBtn.style.display = 'inline-flex';
     setDataButtons(true);
     return;
   }
@@ -519,6 +533,7 @@ function updateAuthUi() {
     loginBtn.style.display = 'none';
     logoutBtn.style.display = 'none';
     migrateBtn.style.display = 'none';
+    if (diagBtn) diagBtn.style.display = 'inline-flex';
     setDataButtons(false);
     return;
   }
@@ -529,6 +544,7 @@ function updateAuthUi() {
     loginBtn.textContent = '설정 오류 확인';
     logoutBtn.style.display = 'none';
     migrateBtn.style.display = 'none';
+    if (diagBtn) diagBtn.style.display = 'inline-flex';
     setDataButtons(false);
     return;
   }
@@ -539,6 +555,7 @@ function updateAuthUi() {
     logoutBtn.textContent = `로그아웃`;
     const hasLocalOnly = state.localCards.length > 0;
     migrateBtn.style.display = hasLocalOnly ? 'inline-flex' : 'none';
+    if (diagBtn) diagBtn.style.display = 'inline-flex';
     setDataButtons(true);
     const curStatus = document.getElementById('sync-status')?.textContent || '';
     if (!curStatus.includes('저장') && !curStatus.includes('불러오는 중')) {
@@ -550,6 +567,7 @@ function updateAuthUi() {
     loginBtn.textContent = '로그인';
     logoutBtn.style.display = 'none';
     migrateBtn.style.display = 'none';
+    if (diagBtn) diagBtn.style.display = 'inline-flex';
     setDataButtons(false);
   }
 }
@@ -591,6 +609,8 @@ function openAuthModal() {
     return;
   }
   errEl.textContent = '';
+  const diagBox = document.getElementById('firebase-diagnostics');
+  if (diagBox) { diagBox.style.display = 'none'; diagBox.textContent = ''; }
   overlay.classList.add('open');
 
   if (!FIREBASE_ENABLED) {
@@ -671,6 +691,19 @@ async function runFirebaseDiagnostics() {
   }
 }
 
+
+function isValidEmailFormat(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+
+function setAuthBusy(isBusy) {
+  document.querySelectorAll('#auth-overlay .modal-btns button').forEach(btn => {
+    btn.disabled = !!isBusy;
+    btn.style.opacity = isBusy ? '.65' : '';
+    btn.style.cursor = isBusy ? 'wait' : '';
+  });
+}
+
 async function handleLogin() {
   const errEl = document.getElementById('auth-error');
   if (!FIREBASE_ENABLED) { errEl.textContent = 'Firebase 설정값이 입력되지 않았습니다.'; return; }
@@ -678,12 +711,15 @@ async function handleLogin() {
   if (!auth) { errEl.textContent = 'Firebase 초기화 중입니다. 잠시 후 다시 시도해주세요.'; return; }
   const { email, password } = authValues();
   if (!email || !password) { errEl.textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
+  if (!isValidEmailFormat(email)) { errEl.textContent = '이메일 형식으로 입력해주세요. 예: yourname@gmail.com'; document.getElementById('auth-email').focus(); return; }
   try {
+    setAuthBusy(true);
     errEl.textContent = '로그인 중입니다...';
     await auth.signInWithEmailAndPassword(email, password);
     errEl.textContent = '';
     closeAuthModal();
   } catch(e) { showAuthError(e); }
+  finally { setAuthBusy(false); }
 }
 
 async function handleSignup() {
@@ -693,13 +729,16 @@ async function handleSignup() {
   if (!auth) { errEl.textContent = 'Firebase 초기화 중입니다. 잠시 후 다시 시도해주세요.'; return; }
   const { email, password } = authValues();
   if (!email || !password) { errEl.textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
+  if (!isValidEmailFormat(email)) { errEl.textContent = '이메일 형식으로 입력해주세요. 예: yourname@gmail.com'; document.getElementById('auth-email').focus(); return; }
   if (password.length < 6) { errEl.textContent = '비밀번호는 6자 이상이어야 합니다.'; return; }
   try {
+    setAuthBusy(true);
     errEl.textContent = '회원가입 중입니다...';
     await auth.createUserWithEmailAndPassword(email, password);
     errEl.textContent = '';
     closeAuthModal();
   } catch(e) { showAuthError(e); }
+  finally { setAuthBusy(false); }
 }
 
 async function handleLogout() {
@@ -1349,6 +1388,21 @@ function uid()  { return Date.now().toString(36) + Math.random().toString(36).sl
 function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function escAttr(s) { return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
+
+window.addEventListener('error', function(e) {
+  console.error('Global error:', e.error || e.message);
+  const main = document.getElementById('main-content');
+  const msg = e?.message || '알 수 없는 스크립트 오류';
+  if (main && !main.innerHTML.trim()) {
+    main.innerHTML = `<div class="auth-box"><h2>스크립트 오류</h2><p>${escHtml(msg)}</p><div class="auth-note">FIREBASE_CONFIG를 붙여넣는 과정에서 따옴표, 쉼표, 중괄호가 깨졌을 가능성이 큽니다. 원본 Firebase 설정 블록을 그대로 다시 붙여넣으세요.</div></div>`;
+  }
+  setSyncStatus('스크립트 오류', 'warn');
+});
+window.addEventListener('unhandledrejection', function(e) {
+  console.error('Unhandled rejection:', e.reason);
+  setSyncStatus('작업 오류', 'warn');
+});
+
 // 오버레이 바깥 클릭
 document.getElementById('auth-overlay').addEventListener('click', function(e){ if(e.target===this) closeAuthModal(); });
 document.getElementById('auth-password').addEventListener('keydown', function(e){ if(e.key==='Enter') handleLogin(); });
@@ -1364,6 +1418,13 @@ document.addEventListener('keydown', e => { if(e.key==='Escape'){ closeAuthModal
 loadState();
 initFirebase();
 render();
+setTimeout(() => {
+  const main = document.getElementById('main-content');
+  if (main && !main.innerHTML.trim()) {
+    main.innerHTML = `<div class="auth-box"><h2>화면을 불러오지 못했습니다</h2><p>Firebase 설정 또는 스크립트 실행 중 문제가 생겼습니다.</p><button class="btn primary" onclick="openAuthModal(); setTimeout(runFirebaseDiagnostics, 80)">Firebase 점검</button><div class="auth-note">상단 로그인창에서 Firebase 점검 결과를 확인해주세요.</div></div>`;
+    updateAuthUi();
+  }
+}, 800);
 </script>
 </body>
 </html>
