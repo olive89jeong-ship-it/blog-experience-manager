@@ -82,6 +82,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
 .card-del{margin-left:auto;padding:4px 8px;border-radius:6px;border:none;font-size:12px;cursor:pointer;background:transparent;color:#ccc;font-family:inherit;transition:color .15s}
 .card-del:hover{color:#e55}
 
+
+
+/* ── IMAGE PASTE FIELD ── */
+.image-paste-box{border:1.5px dashed #cfcbe9;background:#fbfaff;border-radius:12px;min-height:126px;padding:12px;display:flex;align-items:center;justify-content:center;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.image-paste-box:hover,.image-paste-box:focus{outline:none;border-color:#3d35a8;background:#fff}
+.image-paste-empty{color:#777;font-size:13px;line-height:1.7}
+.image-paste-empty strong{color:#3d35a8;font-weight:700}
+.image-preview-wrap{display:none;width:100%}
+.image-preview-wrap.open{display:block}
+.image-preview{display:block;width:100%;max-height:260px;object-fit:contain;border-radius:10px;border:1px solid #eee;background:#f4f4f2}
+.image-action-row{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.image-file-label{padding:6px 11px;border-radius:8px;border:1px solid #ddd;background:#fff;color:#333;font-size:12px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px}
+.image-file-label:hover{background:#f5f5f3;border-color:#bbb}
+.image-remove-btn{padding:6px 11px;border-radius:8px;border:1px solid #ddd;background:#fff;color:#777;font-size:12px;cursor:pointer;font-family:inherit}
+.image-remove-btn:hover{color:#e55;border-color:#e55}
+.card-image-wrap{margin:2px 0 10px;border-radius:10px;overflow:hidden;border:1px solid #f0f0ee;background:#fafafa}
+.card-image{display:block;width:100%;height:150px;object-fit:cover}
+.detail-image-wrap{margin-bottom:15px;border-radius:12px;overflow:hidden;border:1px solid #f0f0ee;background:#fafafa}
+.detail-image{display:block;width:100%;max-height:360px;object-fit:contain;background:#f7f7f5}
+
 /* ── CALENDAR ── */
 .cal-wrap{background:#fff;border-radius:14px;border:1px solid #e8e8e6;overflow:hidden}
 .cal-header{display:flex;align-items:center;justify-content:space-between;padding:15px 20px;border-bottom:1px solid #f0f0ee}
@@ -383,6 +403,28 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
     font-size:14px;
     border-radius:12px;
   }
+
+  .image-paste-box{
+    min-height:118px;
+    border-radius:12px;
+  }
+  .image-preview{
+    max-height:230px;
+  }
+  .image-action-row{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+  }
+  .image-file-label,
+  .image-remove-btn{
+    width:100%;
+    min-height:38px;
+    justify-content:center;
+  }
+  .card-image{
+    height:170px;
+  }
+
   .auth-box{
     margin:32px 0;
     padding:22px 18px;
@@ -607,8 +649,27 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans
     </div>
     <div class="field"><label>업체주소</label><input id="f-addr" placeholder="예: 서울시 강남구 테헤란로 123"/></div>
     <div class="field"><label>체험단 상세 URL</label><input id="f-url" placeholder="예: https://..."/></div>
+
+    <div class="field">
+      <label>참고 이미지</label>
+      <div class="image-paste-box" id="image-paste-box" tabindex="0" onclick="focusImagePasteBox()" onpaste="handleImagePaste(event)" ondragover="event.preventDefault()" ondrop="handleImageDrop(event)">
+        <div class="image-paste-empty" id="image-paste-empty">
+          📷 <strong>캡처 이미지 붙여넣기</strong><br>
+          이 영역을 클릭한 뒤 Ctrl+V로 붙여넣으세요.
+        </div>
+        <div class="image-preview-wrap" id="image-preview-wrap">
+          <img id="image-preview" class="image-preview" alt="체험단 참고 이미지">
+        </div>
+      </div>
+      <div class="image-action-row">
+        <label class="image-file-label">이미지 파일 선택<input type="file" id="f-image-file" accept="image/*" style="display:none" onchange="handleImageFileSelect(event)"></label>
+        <button class="image-remove-btn" type="button" onclick="removeFormImage()">이미지 삭제</button>
+      </div>
+      <div class="field-hint">스크린샷은 자동으로 압축되어 저장됩니다. 카드당 이미지 1개를 권장합니다.</div>
+    </div>
     <div class="field"><label>마케팅업체</label><input id="f-agency" placeholder="예: 강남맛집리뷰"/></div>
     <div class="field"><label>혜택내역</label><textarea id="f-benefit" placeholder="예: 1인 식사 무료 제공 (최대 2만원)"></textarea></div>
+    <div class="field"><label>예약 가능/불가 메모</label><textarea id="f-memo" placeholder="예: 평일 저녁 7시 이후 가능, 주말 예약 불가, 최소 하루 전 예약 필요"></textarea><div class="field-hint">업체가 예약 가능한 시간, 불가능한 요일, 예약 조건 등을 메모하세요.</div></div>
     <div class="field-row">
       <div class="field"><label>등록기간 시작</label><input id="f-start" placeholder="예: 2025.06.01"/></div>
       <div class="field"><label>등록기간 종료</label><input id="f-end" placeholder="예: 2025.06.30"/></div>
@@ -741,6 +802,7 @@ let auth = null;
 let db = null;
 let cloudSaveTimer = null;
 let firebaseInitError = '';
+let formImageData = '';
 
 let state = {
   tab: 'active',
@@ -871,7 +933,7 @@ function saveCloudState() {
   }).catch(err => {
     console.error(err);
     setSyncStatus('저장 실패', 'warn');
-    alert('클라우드 저장에 실패했습니다. Firebase 설정과 보안 규칙을 확인해주세요.');
+    alert('클라우드 저장에 실패했습니다. Firebase 설정, 보안 규칙, 이미지 용량을 확인해주세요. 이미지가 많은 경우 카드당 1개 이하로 줄여주세요.');
   });
 }
 
@@ -1201,6 +1263,7 @@ function render() {
 function renderCardHTML(c) {
   const status = c.status || 'contact';
   const kw = (c.keywords || []).join(' ');
+  const imageHtml = c.imageData ? `<div class="card-image-wrap"><img class="card-image" src="${escAttr(c.imageData)}" alt="${escAttr(c.name || '체험단 참고 이미지')}"></div>` : '';
 
   // 방문 일정 표시
   let visitRow = '';
@@ -1243,9 +1306,11 @@ function renderCardHTML(c) {
       </div>
       ${statusTag(status)}
     </div>
+    ${imageHtml}
     <div class="card-body">
       ${c.phone   ? `<div class="card-row phone-row"><span class="card-row-icon">📞</span><span class="card-row-val">${escHtml(c.phone)}</span><button class="phone-copy-btn" type="button" data-phone="${escAttr(c.phone)}" onclick="copyPhoneFromBtn(this)">복사</button></div>` : ''}
       ${c.benefit ? `<div class="card-row"><span class="card-row-icon">🎁</span><span class="card-row-val">${escHtml(c.benefit)}</span></div>` : ''}
+      ${c.memo ? `<div class="card-row"><span class="card-row-icon">📝</span><span class="card-row-val">${escHtml(c.memo)}</span></div>` : ''}
       ${(c.startDate||c.endDate) ? `<div class="card-row"><span class="card-row-icon">📆</span><span class="card-row-val">${escHtml((c.startDate||'')+(c.startDate&&c.endDate?' ~ ':'')+(c.endDate||''))}</span></div>` : ''}
       ${visitRow}
       ${kw ? `<div class="card-keywords">${escHtml(kw)}</div>` : ''}
@@ -1328,12 +1393,14 @@ function renderCalendar() {
         <div class="detail-panel-header">
           <h3>🏪 ${escHtml(c.name)} ${statusTag(c.status)}</h3>
         </div>
+        ${c.imageData ? `<div class="detail-image-wrap"><img class="detail-image" src="${escAttr(c.imageData)}" alt="${escAttr(c.name || '체험단 참고 이미지')}"></div>` : ''}
         <div class="detail-grid">
           <div class="detail-item"><div class="dl">방문 일정</div><div class="dv" style="color:#1a7a4a;font-weight:600">${c.visitDate}${vt}</div></div>
           <div class="detail-item"><div class="dl">업체연락처</div><div class="dv">${escHtml(c.phone||'-')}</div></div>
           <div class="detail-item"><div class="dl">업체주소</div><div class="dv">${escHtml(c.address||'-')}</div></div>
           <div class="detail-item"><div class="dl">마케팅업체</div><div class="dv">${escHtml(c.agency||'-')}</div></div>
           <div class="detail-item" style="grid-column:1/-1"><div class="dl">혜택내역</div><div class="dv">${escHtml(c.benefit||'-')}</div></div>
+          ${c.memo ? `<div class="detail-item" style="grid-column:1/-1"><div class="dl">예약 메모</div><div class="dv">${escHtml(c.memo)}</div></div>` : ''}
           <div class="detail-item" style="grid-column:1/-1"><div class="dl">등록기간</div><div class="dv">${escHtml((c.startDate||'')+(c.startDate&&c.endDate?' ~ ':'')+(c.endDate||''))}</div></div>
           ${kw ? `<div class="detail-item" style="grid-column:1/-1"><div class="dl">키워드</div><div class="dv" style="color:#888">${escHtml(kw)}</div></div>` : ''}
           ${c.visitMemo ? `<div class="detail-item" style="grid-column:1/-1"><div class="dl">메모</div><div class="dv">${escHtml(c.visitMemo)}</div></div>` : ''}
@@ -1440,12 +1507,14 @@ function deleteCard(id) {
 // ─────────────────────────────────────────────
 //  ADD / EDIT MODAL
 // ─────────────────────────────────────────────
-const FIELDS = ['f-name','f-phone','f-addr','f-url','f-agency','f-benefit','f-start','f-end','f-keywords'];
+const FIELDS = ['f-name','f-phone','f-addr','f-url','f-agency','f-benefit','f-memo','f-start','f-end','f-keywords'];
 
 function openAddModal() {
   if (!requireAccess()) return;
   state.editTargetId = null;
   FIELDS.forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  formImageData = '';
+  renderFormImagePreview();
   document.getElementById('modal-title').textContent = '📝 체험단 추가';
   document.getElementById('modal-save-btn').textContent = '💾 저장';
   document.getElementById('modal-save-btn').onclick = saveCard;
@@ -1463,9 +1532,12 @@ function openEditModal(id) {
   document.getElementById('f-url').value      = c.url       || '';
   document.getElementById('f-agency').value   = c.agency    || '';
   document.getElementById('f-benefit').value  = c.benefit   || '';
+  document.getElementById('f-memo').value     = c.memo      || '';
   document.getElementById('f-start').value    = c.startDate || '';
   document.getElementById('f-end').value      = c.endDate   || '';
   document.getElementById('f-keywords').value = (c.keywords||[]).join(' ');
+  formImageData = c.imageData || '';
+  renderFormImagePreview();
   document.getElementById('modal-title').textContent = '✏️ 카드 수정';
   document.getElementById('modal-save-btn').textContent = '💾 수정 저장';
   document.getElementById('modal-save-btn').onclick = saveEdit;
@@ -1476,6 +1548,7 @@ function openEditModal(id) {
 function closeAddModal() {
   document.getElementById('add-overlay').classList.remove('open');
   state.editTargetId = null;
+  formImageData = '';
 }
 
 function readForm() {
@@ -1487,6 +1560,8 @@ function readForm() {
     url:       document.getElementById('f-url').value.trim(),
     agency:    document.getElementById('f-agency').value.trim(),
     benefit:   document.getElementById('f-benefit').value.trim(),
+    memo:      document.getElementById('f-memo').value.trim(),
+    imageData: formImageData || '',
     startDate: document.getElementById('f-start').value.trim(),
     endDate:   document.getElementById('f-end').value.trim(),
     keywords:  kwRaw ? kwRaw.split(/\s+/).filter(Boolean) : []
@@ -1507,6 +1582,108 @@ function saveEdit() {
   if (!data.name) { alert('업체명을 입력해주세요.'); document.getElementById('f-name').focus(); return; }
   Object.assign(c, data);
   saveState(); closeAddModal(); render();
+}
+
+
+// ─────────────────────────────────────────────
+//  IMAGE PASTE / UPLOAD FIELD
+// ─────────────────────────────────────────────
+function focusImagePasteBox() {
+  const box = document.getElementById('image-paste-box');
+  if (box) box.focus();
+}
+
+function renderFormImagePreview() {
+  const empty = document.getElementById('image-paste-empty');
+  const wrap = document.getElementById('image-preview-wrap');
+  const img = document.getElementById('image-preview');
+  const fileInput = document.getElementById('f-image-file');
+  if (!empty || !wrap || !img) return;
+  if (formImageData) {
+    img.src = formImageData;
+    empty.style.display = 'none';
+    wrap.classList.add('open');
+  } else {
+    img.removeAttribute('src');
+    empty.style.display = 'block';
+    wrap.classList.remove('open');
+  }
+  if (fileInput) fileInput.value = '';
+}
+
+function removeFormImage() {
+  formImageData = '';
+  renderFormImagePreview();
+}
+
+async function handleImageFileSelect(event) {
+  const file = event?.target?.files?.[0];
+  if (!file) return;
+  await setFormImageFromFile(file);
+}
+
+async function handleImagePaste(event) {
+  const items = Array.from(event?.clipboardData?.items || []);
+  const imageItem = items.find(item => item.type && item.type.startsWith('image/'));
+  if (!imageItem) return;
+  event.preventDefault();
+  const file = imageItem.getAsFile();
+  if (file) await setFormImageFromFile(file);
+}
+
+async function handleImageDrop(event) {
+  event.preventDefault();
+  const file = Array.from(event?.dataTransfer?.files || []).find(f => f.type && f.type.startsWith('image/'));
+  if (file) await setFormImageFromFile(file);
+}
+
+async function setFormImageFromFile(file) {
+  if (!file || !file.type || !file.type.startsWith('image/')) {
+    alert('이미지 파일만 등록할 수 있습니다.');
+    return;
+  }
+  try {
+    formImageData = await compressImageFile(file);
+    renderFormImagePreview();
+  } catch (err) {
+    console.error(err);
+    alert('이미지를 불러오지 못했습니다. 다른 이미지로 다시 시도해주세요.');
+  }
+}
+
+function compressImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxSide = 900;
+        let { width, height } = img;
+        const ratio = Math.min(1, maxSide / Math.max(width, height));
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        let quality = 0.78;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+        while (dataUrl.length > 180000 && quality > 0.36) {
+          quality -= 0.08;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+        }
+        resolve(dataUrl);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 
@@ -1653,6 +1830,7 @@ function buildGcalUrl(c) {
   const descLines = [];
   if (c.visitTime)  descLines.push(`방문 시간: ${c.visitTime}`);
   if (c.benefit)    descLines.push(`혜택: ${c.benefit}`);
+  if (c.memo)       descLines.push(`예약 메모: ${c.memo}`);
   if (c.agency)     descLines.push(`마케팅업체: ${c.agency}`);
   if ((c.keywords||[]).length) descLines.push(`키워드: ${c.keywords.join(' ')}`);
   if (c.visitMemo)  descLines.push(`메모: ${c.visitMemo}`);
@@ -1789,6 +1967,22 @@ window.addEventListener('error', function(e) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled rejection:', e.reason);
   setSyncStatus('작업 오류', 'warn');
+});
+
+
+
+// 추가/수정 모달이 열려 있을 때, 입력칸이 아닌 곳에서 Ctrl+V 이미지 붙여넣기를 지원
+// 텍스트 입력 중에는 기존 붙여넣기 동작을 방해하지 않습니다.
+document.addEventListener('paste', function(event) {
+  if (event.defaultPrevented) return;
+  const addOverlay = document.getElementById('add-overlay');
+  if (!addOverlay || !addOverlay.classList.contains('open')) return;
+  const active = document.activeElement;
+  const tag = active?.tagName;
+  const isTypingField = tag === 'INPUT' || tag === 'TEXTAREA' || active?.isContentEditable;
+  if (isTypingField && active?.id !== 'image-paste-box') return;
+  const hasImage = Array.from(event.clipboardData?.items || []).some(item => item.type && item.type.startsWith('image/'));
+  if (hasImage) handleImagePaste(event);
 });
 
 // 오버레이 바깥 클릭
